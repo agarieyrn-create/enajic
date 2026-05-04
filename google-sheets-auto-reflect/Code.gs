@@ -581,30 +581,9 @@ function getOrCreateSheet_(ss, name, rowCount, columnCount) {
   if (existing) return existing;
   const rows = rowCount || 60;
   const columns = columnCount || 16;
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${ss.getId()}:batchUpdate`;
-  UrlFetchApp.fetch(url, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
-    payload: JSON.stringify({
-      requests: [{
-        addSheet: {
-          properties: {
-            title: name,
-            gridProperties: {
-              rowCount: rows,
-              columnCount: columns,
-            },
-          },
-        },
-      }],
-    }),
-  });
-  SpreadsheetApp.flush();
-  const created = ss.getSheetByName(name);
-  if (!created) {
-    throw new Error(`シート「${name}」を作成できませんでした。`);
-  }
+  const template = findSmallestSheet_(ss);
+  const created = template ? template.copyTo(ss).setName(name) : ss.insertSheet(name);
+  resizeSheet_(created, rows, columns);
   return created;
 }
 
@@ -621,6 +600,17 @@ function resizeSheet_(sheet, rowCount, columnCount) {
   } else if (maxColumns < columnCount) {
     sheet.insertColumnsAfter(maxColumns, columnCount - maxColumns);
   }
+}
+
+function findSmallestSheet_(ss) {
+  const sheets = ss.getSheets().filter((sheet) => sheet.getSheetType() === SpreadsheetApp.SheetType.GRID);
+  if (sheets.length === 0) return null;
+  return sheets
+    .map((sheet) => ({
+      sheet,
+      cells: sheet.getMaxRows() * sheet.getMaxColumns(),
+    }))
+    .sort((a, b) => a.cells - b.cells)[0].sheet;
 }
 
 function autoResizeAll_(ss) {
