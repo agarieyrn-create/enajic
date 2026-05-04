@@ -14,6 +14,15 @@
 
 ## セットアップ
 
+## 作成済みGoogleプロジェクト
+
+- Spreadsheet: https://docs.google.com/spreadsheets/d/1AKld6qH6Y0oSiMTmoi84FUSLmoXwh7ZLKeic_hw_n-M/edit
+- Apps Script: https://script.google.com/d/1IgQRChu6kufTkMI7joyHR1FUeQil4Me2EcaU9iMX65uInIIjhEyhWswD/edit
+
+このリポジトリの `google-sheets-auto-reflect` は、上記Apps Scriptプロジェクトへ `clasp push` 済みです。
+
+## 新しいシートへ手動で導入する場合
+
 1. Googleスプレッドシートを新規作成する。
 2. `拡張機能 > Apps Script` を開く。
 3. `Code.gs` にこのフォルダの `Code.gs` を貼り付ける。
