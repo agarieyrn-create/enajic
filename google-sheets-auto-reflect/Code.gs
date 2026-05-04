@@ -143,7 +143,7 @@ function autoReflect() {
 
   writeInputUpdates_(inputSheet, updates);
   writeInventory_(ss, Array.from(aggregate.values()));
-  writeReport_(ss, Array.from(aggregate.values()), getTargetDateKey_(ss));
+  writeReport_(ss, Array.from(aggregate.values()), getTargetDateKey_(ss), SHEETS.report);
   SpreadsheetApp.getActive().toast('3施設別在庫と報告表を更新しました。', '3施設 自動反映', 5);
 }
 
@@ -151,13 +151,17 @@ function createDailyReport() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureRequiredSheets_(ss);
   const rows = readInventory_(ss);
-  writeReport_(ss, rows, getTargetDateKey_(ss));
-  SpreadsheetApp.getActive().toast('日付別報告表を作成しました。', '3施設 自動反映', 5);
+  const targetDateKey = getTargetDateKey_(ss);
+  const sheetName = getDailyReportSheetName_(targetDateKey);
+  writeReport_(ss, rows, targetDateKey, sheetName);
+  ss.setActiveSheet(ss.getSheetByName(sheetName));
+  SpreadsheetApp.getActive().toast(`${sheetName} を作成/更新しました。`, '3施設 自動反映', 5);
 }
 
 function exportReportPdf() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.report);
+  const dailySheetName = getDailyReportSheetName_(getTargetDateKey_(ss));
+  const sheet = ss.getSheetByName(dailySheetName) || ss.getSheetByName(SHEETS.report);
   if (!sheet) {
     throw new Error(`シート「${SHEETS.report}」がありません。先に初期セットアップを実行してください。`);
   }
@@ -165,7 +169,7 @@ function exportReportPdf() {
   const folderId = getSettingValue_(ss, 'PDF保存先フォルダID');
   const folder = folderId ? DriveApp.getFolderById(folderId) : DriveApp.getRootFolder();
   const dateKey = getTargetDateKey_(ss);
-  const fileName = `3施設別報告表_${dateKey}.pdf`;
+  const fileName = `${sheet.getName()}_3施設別報告表.pdf`;
   const url = buildPdfExportUrl_(ss.getId(), sheet.getSheetId());
   const token = ScriptApp.getOAuthToken();
   const response = UrlFetchApp.fetch(url, {
@@ -244,8 +248,7 @@ function setupPreviousSheet_(ss) {
 }
 
 function setupReportSheet_(ss) {
-  const sheet = getOrCreateSheet_(ss, SHEETS.report);
-  writeReport_(ss, [], getTargetDateKey_(ss));
+  writeReport_(ss, [], getTargetDateKey_(ss), SHEETS.report);
 }
 
 function ensureRequiredSheets_(ss) {
@@ -346,8 +349,8 @@ function readInventory_(ss) {
     }));
 }
 
-function writeReport_(ss, rows, targetDateKey) {
-  const sheet = ss.getSheetByName(SHEETS.report);
+function writeReport_(ss, rows, targetDateKey, sheetName) {
+  const sheet = getOrCreateSheet_(ss, sheetName || SHEETS.report);
   const previous = getPreviousStock_(ss);
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart();
   sheet.clear();
@@ -451,6 +454,14 @@ function applySideValidation_(range) {
 function getTargetDateKey_(ss) {
   const value = getSettingValue_(ss, '報告対象日');
   return toDateKey_(value) || toDateKey_(new Date());
+}
+
+function getDailyReportSheetName_(dateKey) {
+  const parts = dateKey.split('-').map((value) => Number(value));
+  if (parts.length !== 3 || parts.some((value) => !Number.isFinite(value))) {
+    return `${dateKey}(3)`;
+  }
+  return `${parts[0]}.${parts[1]}.${parts[2]}(3)`;
 }
 
 function getSettingValue_(ss, key) {

@@ -16,8 +16,8 @@
 
 ## 作成済みGoogleプロジェクト
 
-- Spreadsheet: https://docs.google.com/spreadsheets/d/1AKld6qH6Y0oSiMTmoi84FUSLmoXwh7ZLKeic_hw_n-M/edit
-- Apps Script: https://script.google.com/d/1IgQRChu6kufTkMI7joyHR1FUeQil4Me2EcaU9iMX65uInIIjhEyhWswD/edit
+- Spreadsheet: https://docs.google.com/spreadsheets/d/1p4np21i3CzGXYu0piVnI_WjMOYc8Eo9CS0D47G0-QEk/edit
+- Apps Script: https://script.google.com/d/1n-T9jg3noaqFUqGey9ouB9fLdYB4iIXPECtClDgZvKD7eMp2pSFDpuaQ/edit
 
 このリポジトリの `google-sheets-auto-reflect` は、上記Apps Scriptプロジェクトへ `clasp push` 済みです。
 
@@ -40,8 +40,8 @@
 4. メニュー `3施設 自動反映 > 自動反映` を実行する。
 5. `3施設別在庫` と `3施設別報告表` を確認する。
    `3施設別報告表` は、既存Excelの `2026.4.30(3)` と同じく、各施設に `前日 / IN / OUT / 残り` を表示します。
-6. `設定` の `報告対象日` を変えた場合は、`日付別報告作成` を実行する。
-7. PDFが必要な場合は、`PDF出力` を実行する。
+6. `設定` の `報告対象日` を変えて `日付別報告作成` を実行すると、`2026.5.4(3)` のような日付シートを作成/更新します。
+7. PDFが必要な場合は、`PDF出力` を実行する。日付シートがあれば、その日付シートをPDF出力します。
 
 ## ボタン化
 
