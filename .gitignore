@@ -1,0 +1,9 @@
+# Business source files and customer materials are not committed by default.
+資料/
+*.xlsx
+*.xls
+*.pdf
+
+# Local/editor noise
+.DS_Store
+Thumbs.db
