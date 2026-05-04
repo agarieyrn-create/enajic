@@ -8,10 +8,35 @@ const SHEETS = {
   parts: '部位マスタ',
 };
 
+const DEFAULT_SOURCE_SPREADSHEET_ID = '1K-cR1Cw4ycldHk6wl4MLwjnL0UejdTYJXIpycNaE8ck';
+
 const FACILITIES = [
   'カンゲンファームブロック肉',
   '今帰仁冷凍施設',
   'アロマ加工場',
+];
+
+const SOURCE_CONFIGS = [
+  {
+    settingKey: '今帰仁元シート名',
+    defaultSheetName: '2026.3～今帰仁冷凍施設(ブロック肉)',
+    facility: '今帰仁冷凍施設',
+    dateRow: 90,
+    headerRow: 91,
+    dataStartRow: 92,
+    partCol: 5,
+    firstDateCol: 8,
+  },
+  {
+    settingKey: 'アロマ元シート名',
+    defaultSheetName: '2026.3～アロマ加工場（ブロック肉）',
+    facility: 'アロマ加工場',
+    dateRow: 89,
+    headerRow: 90,
+    dataStartRow: 91,
+    partCol: 3,
+    firstDateCol: 6,
+  },
 ];
 
 const PARTS = [
@@ -77,14 +102,14 @@ const INPUT_HEADERS = [
 ];
 
 const RULE_HEADERS = ['部位名', '反映先施設', '有効', '備考'];
-const INVENTORY_HEADERS = ['反映日', '施設', '部位名', '明細数', '合計重量kg', '摘要'];
+const INVENTORY_HEADERS = ['反映日', '施設', '部位名', '前日', 'IN', 'OUT', '残り', '摘要'];
 const PREVIOUS_HEADERS = ['施設', '部位名', '前日重量kg'];
 
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('3施設 自動反映')
     .addItem('初期セットアップ', 'setupWorkbook')
-    .addItem('自動反映', 'autoReflect')
+    .addItem('自動反映（日付シート作成）', 'autoReflect')
     .addItem('日付別報告作成', 'createDailyReport')
     .addItem('PDF出力', 'exportReportPdf')
     .addToUi();
@@ -94,9 +119,6 @@ function setupWorkbook() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   setupSettingsSheet_(ss);
   setupPartsSheet_(ss);
-  setupRulesSheet_(ss);
-  setupInputSheet_(ss);
-  setupPreviousSheet_(ss);
   setupInventorySheet_(ss);
   setupReportSheet_(ss);
   autoResizeAll_(ss);
@@ -104,54 +126,15 @@ function setupWorkbook() {
 }
 
 function autoReflect() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  ensureRequiredSheets_(ss);
-
-  const inputSheet = ss.getSheetByName(SHEETS.input);
-  const rules = getRoutingRules_(ss);
-  const rows = getInputRows_(inputSheet);
-  const aggregate = new Map();
-  const updates = [];
-
-  rows.forEach((row) => {
-    const rowNo = row.rowNo;
-    const errors = validateInputRow_(row, rules);
-    if (errors.length > 0) {
-      updates.push({ rowNo, facility: '', status: '未反映', error: errors.join(' / ') });
-      return;
-    }
-
-    const facility = rules.get(row.part);
-    const key = makeKey_(row.dateKey, facility, row.part);
-    if (!aggregate.has(key)) {
-      aggregate.set(key, {
-        dateKey: row.dateKey,
-        dateValue: row.dateValue,
-        facility,
-        part: row.part,
-        count: 0,
-        weight: 0,
-        notes: [],
-      });
-    }
-    const item = aggregate.get(key);
-    item.count += 1;
-    item.weight += row.weight;
-    if (row.note && !item.notes.includes(row.note)) item.notes.push(row.note);
-    updates.push({ rowNo, facility, status: '反映済', error: '' });
-  });
-
-  writeInputUpdates_(inputSheet, updates);
-  writeInventory_(ss, Array.from(aggregate.values()));
-  writeReport_(ss, Array.from(aggregate.values()), getTargetDateKey_(ss), SHEETS.report);
-  SpreadsheetApp.getActive().toast('3施設別在庫と報告表を更新しました。', '3施設 自動反映', 5);
+  createDailyReport();
 }
 
 function createDailyReport() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureRequiredSheets_(ss);
-  const rows = readInventory_(ss);
   const targetDateKey = getTargetDateKey_(ss);
+  const rows = readSourceInventory_(ss, targetDateKey);
+  writeInventory_(ss, rows);
   const sheetName = getDailyReportSheetName_(targetDateKey);
   writeReport_(ss, rows, targetDateKey, sheetName);
   ss.setActiveSheet(ss.getSheetByName(sheetName));
@@ -183,9 +166,12 @@ function setupSettingsSheet_(ss) {
   const sheet = getOrCreateSheet_(ss, SHEETS.settings);
   sheet.clear();
   sheet.getRange(1, 1, 1, 2).setValues([['項目', '値']]).setFontWeight('bold');
-  sheet.getRange(2, 1, 3, 2).setValues([
+  sheet.getRange(2, 1, 6, 2).setValues([
     ['報告対象日', new Date()],
     ['PDF保存先フォルダID', ''],
+    ['元データSpreadsheetID', DEFAULT_SOURCE_SPREADSHEET_ID],
+    ['今帰仁元シート名', '2026.3～今帰仁冷凍施設(ブロック肉)'],
+    ['アロマ元シート名', '2026.3～アロマ加工場（ブロック肉）'],
     ['施設名', FACILITIES.join(', ')],
   ]);
   sheet.getRange('B2').setNumberFormat('yyyy/mm/dd');
@@ -252,7 +238,7 @@ function setupReportSheet_(ss) {
 }
 
 function ensureRequiredSheets_(ss) {
-  [SHEETS.input, SHEETS.rules, SHEETS.inventory, SHEETS.report, SHEETS.previous, SHEETS.settings].forEach((name) => {
+  [SHEETS.inventory, SHEETS.report, SHEETS.settings].forEach((name) => {
     if (!ss.getSheetByName(name)) {
       throw new Error(`シート「${name}」がありません。先に「初期セットアップ」を実行してください。`);
     }
@@ -316,6 +302,7 @@ function writeInputUpdates_(sheet, updates) {
 
 function writeInventory_(ss, rows) {
   const sheet = ss.getSheetByName(SHEETS.inventory);
+  sheet.getRange(1, 1, 1, INVENTORY_HEADERS.length).setValues([INVENTORY_HEADERS]).setFontWeight('bold');
   sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), INVENTORY_HEADERS.length).clearContent();
   const sorted = rows.sort(compareAggregateRows_);
   if (sorted.length === 0) return;
@@ -323,13 +310,15 @@ function writeInventory_(ss, rows) {
     row.dateValue,
     row.facility,
     row.part,
-    row.count,
-    round2_(row.weight),
+    round2_(row.previous),
+    round2_(row.inWeight),
+    round2_(row.outWeight),
+    round2_(row.remaining),
     row.notes ? row.notes.join(' / ') : '',
   ]);
   sheet.getRange(2, 1, values.length, INVENTORY_HEADERS.length).setValues(values);
   sheet.getRange(2, 1, values.length, 1).setNumberFormat('yyyy/mm/dd');
-  sheet.getRange(2, 5, values.length, 1).setNumberFormat('0.00');
+  sheet.getRange(2, 4, values.length, 4).setNumberFormat('0.00');
 }
 
 function readInventory_(ss) {
@@ -349,9 +338,89 @@ function readInventory_(ss) {
     }));
 }
 
+function readSourceInventory_(ss, targetDateKey) {
+  const sourceSpreadsheetId = normalizeText_(getSettingValue_(ss, '元データSpreadsheetID')) || DEFAULT_SOURCE_SPREADSHEET_ID;
+  const sourceSpreadsheet = SpreadsheetApp.openById(sourceSpreadsheetId);
+  const previousDateKey = addDaysToDateKey_(targetDateKey, -1);
+  const aggregate = new Map();
+
+  SOURCE_CONFIGS.forEach((config) => {
+    const sheetName = normalizeText_(getSettingValue_(ss, config.settingKey)) || config.defaultSheetName;
+    const sourceSheet = sourceSpreadsheet.getSheetByName(sheetName);
+    if (!sourceSheet) {
+      throw new Error(`元データシート「${sheetName}」が見つかりません。設定を確認してください。`);
+    }
+
+    const sourceRows = readSourceSheet_(sourceSheet, config, targetDateKey, previousDateKey);
+    sourceRows.forEach((row) => {
+      const key = makeKey_(targetDateKey, config.facility, row.part);
+      if (!aggregate.has(key)) {
+        aggregate.set(key, {
+          dateKey: targetDateKey,
+          dateValue: targetDateKey,
+          facility: config.facility,
+          part: row.part,
+          previous: 0,
+          inWeight: 0,
+          outWeight: 0,
+          remaining: 0,
+          notes: [`元: ${sheetName}`],
+        });
+      }
+      const item = aggregate.get(key);
+      item.previous += row.previous;
+      item.inWeight += row.inWeight;
+      item.outWeight += row.outWeight;
+      item.remaining += row.remaining;
+    });
+  });
+
+  return Array.from(aggregate.values());
+}
+
+function readSourceSheet_(sourceSheet, config, targetDateKey, previousDateKey) {
+  const lastColumn = sourceSheet.getLastColumn();
+  const lastRow = sourceSheet.getLastRow();
+  const dateRowValues = sourceSheet.getRange(config.dateRow, 1, 1, lastColumn).getValues()[0];
+  const headerRowValues = sourceSheet.getRange(config.headerRow, 1, 1, lastColumn).getValues()[0];
+  const targetCol = findDateColumn_(dateRowValues, headerRowValues, targetDateKey, config);
+  const previousCol = findDateColumn_(dateRowValues, headerRowValues, previousDateKey, config);
+  const requiredLastCol = Math.max(config.partCol, targetCol + 2, previousCol + 2);
+  const values = sourceSheet
+    .getRange(config.dataStartRow, 1, lastRow - config.dataStartRow + 1, requiredLastCol)
+    .getValues();
+  const rows = [];
+
+  values.forEach((row) => {
+    const part = normalizePartName_(row[config.partCol - 1]);
+    if (!part || !PARTS.includes(part)) return;
+    rows.push({
+      part,
+      previous: toNumber_(row[previousCol + 1]),
+      inWeight: toNumber_(row[targetCol - 1]),
+      outWeight: toNumber_(row[targetCol]),
+      remaining: toNumber_(row[targetCol + 1]),
+    });
+  });
+
+  return rows;
+}
+
+function findDateColumn_(dateRowValues, headerRowValues, dateKey, config) {
+  for (let index = config.firstDateCol - 1; index < dateRowValues.length; index += 1) {
+    if (toDateKey_(dateRowValues[index]) !== dateKey) continue;
+    const inHeader = normalizeText_(headerRowValues[index]);
+    const outHeader = normalizeText_(headerRowValues[index + 1]);
+    const remainingHeader = normalizeText_(headerRowValues[index + 2]);
+    if (inHeader === '入庫' && outHeader === '出庫' && remainingHeader === '残数') {
+      return index + 1;
+    }
+  }
+  throw new Error(`元データシート「${config.defaultSheetName}」に ${dateKey} の入庫/出庫/残数列が見つかりません。`);
+}
+
 function writeReport_(ss, rows, targetDateKey, sheetName) {
   const sheet = getOrCreateSheet_(ss, sheetName || SHEETS.report);
-  const previous = getPreviousStock_(ss);
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart();
   sheet.clear();
   sheet.getRange('A1').setValue('報告対象日');
@@ -392,14 +461,16 @@ function writeReport_(ss, rows, targetDateKey, sheetName) {
     const notes = [];
     FACILITIES.forEach((facility, facilityIndex) => {
       const data = byFacilityPart.get(makeKey_('', facility, part));
-      const prev = previous.get(makeKey_('', facility, part)) || 0;
-      const inWeight = data ? data.weight : 0;
+      const prev = data ? data.previous : 0;
+      const inWeight = data ? data.inWeight : 0;
+      const outWeight = data ? data.outWeight : 0;
+      const remaining = data ? data.remaining : 0;
       if (data && data.notes) {
         data.notes.forEach((note) => {
           if (note && !notes.includes(note)) notes.push(note);
         });
       }
-      row.push(round2_(prev), round2_(inWeight), 0, '');
+      row.push(round2_(prev), round2_(inWeight), round2_(outWeight), round2_(remaining));
     });
     row.push(notes.join(' / '));
     return row;
@@ -407,12 +478,6 @@ function writeReport_(ss, rows, targetDateKey, sheetName) {
 
   sheet.getRange(3, 3, body.length, 14).setValues(body);
   const totalRow = body.length + 3;
-  PARTS.forEach((_, index) => {
-    const rowNumber = index + 3;
-    sheet.getRange(`G${rowNumber}`).setFormula(`=D${rowNumber}+E${rowNumber}-F${rowNumber}`);
-    sheet.getRange(`K${rowNumber}`).setFormula(`=H${rowNumber}+I${rowNumber}-J${rowNumber}`);
-    sheet.getRange(`O${rowNumber}`).setFormula(`=L${rowNumber}+M${rowNumber}-N${rowNumber}`);
-  });
   sheet.getRange(totalRow, 3).setValue('合計').setFontWeight('bold');
   ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O'].forEach((column) => {
     sheet.getRange(`${column}${totalRow}`).setFormula(`=SUM(${column}3:${column}${totalRow - 1})`).setFontWeight('bold');
@@ -521,6 +586,16 @@ function normalizeText_(value) {
   return value === null || value === undefined ? '' : String(value).trim();
 }
 
+function normalizePartName_(value) {
+  const part = normalizeText_(value).replace(/\s+/g, '');
+  const aliases = {
+    'ミンチ1kg': 'ミンチ',
+    'ミンチ1ｋｇ': 'ミンチ',
+    'ウデ': 'ウデ（しゃくし）',
+  };
+  return aliases[part] || part;
+}
+
 function toNumber_(value) {
   if (value === null || value === undefined || value === '') return 0;
   const number = Number(value);
@@ -529,11 +604,24 @@ function toNumber_(value) {
 
 function toDateKey_(value) {
   if (!value) return '';
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const serialDate = new Date(Math.round((value - 25569) * 86400 * 1000));
+    return Utilities.formatDate(serialDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
   let date = value;
   if (!(date instanceof Date)) {
     date = new Date(value);
   }
   if (Number.isNaN(date.getTime())) return '';
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+
+function addDaysToDateKey_(dateKey, days) {
+  const date = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`日付が不正です: ${dateKey}`);
+  }
+  date.setDate(date.getDate() + days);
   return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
