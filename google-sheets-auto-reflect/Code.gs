@@ -603,7 +603,7 @@ function resizeSheet_(sheet, rowCount, columnCount) {
 }
 
 function findSmallestSheet_(ss) {
-  const sheets = ss.getSheets().filter((sheet) => sheet.getSheetType() === SpreadsheetApp.SheetType.GRID);
+  const sheets = ss.getSheets();
   if (sheets.length === 0) return null;
   return sheets
     .map((sheet) => ({
