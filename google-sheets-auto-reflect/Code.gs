@@ -163,7 +163,8 @@ function exportReportPdf() {
 }
 
 function setupSettingsSheet_(ss) {
-  const sheet = getOrCreateSheet_(ss, SHEETS.settings);
+  const sheet = getOrCreateSheet_(ss, SHEETS.settings, 20, 2);
+  resizeSheet_(sheet, 20, 2);
   sheet.clear();
   sheet.getRange(1, 1, 1, 2).setValues([['項目', '値']]).setFontWeight('bold');
   sheet.getRange(2, 1, 6, 2).setValues([
@@ -179,7 +180,8 @@ function setupSettingsSheet_(ss) {
 }
 
 function setupPartsSheet_(ss) {
-  const sheet = getOrCreateSheet_(ss, SHEETS.parts);
+  const sheet = getOrCreateSheet_(ss, SHEETS.parts, PARTS.length + 1, 1);
+  resizeSheet_(sheet, PARTS.length + 1, 1);
   sheet.clear();
   sheet.getRange(1, 1).setValue('部位名').setFontWeight('bold');
   sheet.getRange(2, 1, PARTS.length, 1).setValues(PARTS.map((part) => [part]));
@@ -187,7 +189,8 @@ function setupPartsSheet_(ss) {
 }
 
 function setupRulesSheet_(ss) {
-  const sheet = getOrCreateSheet_(ss, SHEETS.rules);
+  const sheet = getOrCreateSheet_(ss, SHEETS.rules, PARTS.length + 1, RULE_HEADERS.length);
+  resizeSheet_(sheet, PARTS.length + 1, RULE_HEADERS.length);
   sheet.clear();
   sheet.getRange(1, 1, 1, RULE_HEADERS.length).setValues([RULE_HEADERS]).setFontWeight('bold');
   const defaults = PARTS.map((part) => [part, FACILITIES[1], true, '初期値。必要に応じて施設を変更してください。']);
@@ -198,28 +201,31 @@ function setupRulesSheet_(ss) {
 }
 
 function setupInputSheet_(ss) {
-  const sheet = getOrCreateSheet_(ss, SHEETS.input);
+  const sheet = getOrCreateSheet_(ss, SHEETS.input, 250, INPUT_HEADERS.length);
+  resizeSheet_(sheet, 250, INPUT_HEADERS.length);
   sheet.clear();
   sheet.getRange(1, 1, 1, INPUT_HEADERS.length).setValues([INPUT_HEADERS]).setFontWeight('bold');
-  sheet.getRange(2, 1, 500, 1).setNumberFormat('yyyy/mm/dd');
-  sheet.getRange(2, 5, 500, 1).setNumberFormat('0.00');
-  applyPartValidation_(ss, sheet.getRange(2, 3, 500, 1));
-  applySideValidation_(sheet.getRange(2, 4, 500, 1));
-  sheet.getRange(2, 7, 500, 3).setBackground('#f3f4f6');
+  sheet.getRange(2, 1, 249, 1).setNumberFormat('yyyy/mm/dd');
+  sheet.getRange(2, 5, 249, 1).setNumberFormat('0.00');
+  applyPartValidation_(ss, sheet.getRange(2, 3, 249, 1));
+  applySideValidation_(sheet.getRange(2, 4, 249, 1));
+  sheet.getRange(2, 7, 249, 3).setBackground('#f3f4f6');
   sheet.setFrozenRows(1);
 }
 
 function setupInventorySheet_(ss) {
-  const sheet = getOrCreateSheet_(ss, SHEETS.inventory);
+  const sheet = getOrCreateSheet_(ss, SHEETS.inventory, 250, INVENTORY_HEADERS.length);
+  resizeSheet_(sheet, 250, INVENTORY_HEADERS.length);
   sheet.clear();
   sheet.getRange(1, 1, 1, INVENTORY_HEADERS.length).setValues([INVENTORY_HEADERS]).setFontWeight('bold');
-  sheet.getRange(2, 1, 1000, 1).setNumberFormat('yyyy/mm/dd');
-  sheet.getRange(2, 5, 1000, 1).setNumberFormat('0.00');
+  sheet.getRange(2, 1, 249, 1).setNumberFormat('yyyy/mm/dd');
+  sheet.getRange(2, 4, 249, 4).setNumberFormat('0.00');
   sheet.setFrozenRows(1);
 }
 
 function setupPreviousSheet_(ss) {
-  const sheet = getOrCreateSheet_(ss, SHEETS.previous);
+  const sheet = getOrCreateSheet_(ss, SHEETS.previous, PARTS.length * FACILITIES.length + 1, PREVIOUS_HEADERS.length);
+  resizeSheet_(sheet, PARTS.length * FACILITIES.length + 1, PREVIOUS_HEADERS.length);
   sheet.clear();
   sheet.getRange(1, 1, 1, PREVIOUS_HEADERS.length).setValues([PREVIOUS_HEADERS]).setFontWeight('bold');
   const rows = [];
@@ -420,7 +426,8 @@ function findDateColumn_(dateRowValues, headerRowValues, dateKey, config) {
 }
 
 function writeReport_(ss, rows, targetDateKey, sheetName) {
-  const sheet = getOrCreateSheet_(ss, sheetName || SHEETS.report);
+  const sheet = getOrCreateSheet_(ss, sheetName || SHEETS.report, PARTS.length + 4, 16);
+  resizeSheet_(sheet, PARTS.length + 4, 16);
   sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart();
   sheet.clear();
   sheet.getRange('A1').setValue('報告対象日');
@@ -569,8 +576,51 @@ function buildPdfExportUrl_(spreadsheetId, sheetId) {
   return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?${params}`;
 }
 
-function getOrCreateSheet_(ss, name) {
-  return ss.getSheetByName(name) || ss.insertSheet(name);
+function getOrCreateSheet_(ss, name, rowCount, columnCount) {
+  const existing = ss.getSheetByName(name);
+  if (existing) return existing;
+  const rows = rowCount || 60;
+  const columns = columnCount || 16;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${ss.getId()}:batchUpdate`;
+  UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
+    payload: JSON.stringify({
+      requests: [{
+        addSheet: {
+          properties: {
+            title: name,
+            gridProperties: {
+              rowCount: rows,
+              columnCount: columns,
+            },
+          },
+        },
+      }],
+    }),
+  });
+  SpreadsheetApp.flush();
+  const created = ss.getSheetByName(name);
+  if (!created) {
+    throw new Error(`シート「${name}」を作成できませんでした。`);
+  }
+  return created;
+}
+
+function resizeSheet_(sheet, rowCount, columnCount) {
+  const maxRows = sheet.getMaxRows();
+  const maxColumns = sheet.getMaxColumns();
+  if (maxRows > rowCount) {
+    sheet.deleteRows(rowCount + 1, maxRows - rowCount);
+  } else if (maxRows < rowCount) {
+    sheet.insertRowsAfter(maxRows, rowCount - maxRows);
+  }
+  if (maxColumns > columnCount) {
+    sheet.deleteColumns(columnCount + 1, maxColumns - columnCount);
+  } else if (maxColumns < columnCount) {
+    sheet.insertColumnsAfter(maxColumns, columnCount - maxColumns);
+  }
 }
 
 function autoResizeAll_(ss) {
